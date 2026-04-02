@@ -1,6 +1,6 @@
 # wow-vanilla-backports
 
-A collection of WoW addons backported to the **1.12.1 vanilla client** for use on [TurtleWoW](https://turtle-wow.org/) and other private servers.
+A collection of WoW addons backported to the **1.12.1 vanilla client** for use on [TurtleWoW](https://turtlecraft.gg/) and other private servers.
 
 Every addon here is written in strict Lua 5.0 with no external dependencies — no libraries, no SuperWoW required.
 
