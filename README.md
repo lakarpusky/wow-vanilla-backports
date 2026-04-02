@@ -8,7 +8,7 @@ Every addon here is written in strict Lua 5.0 with no external dependencies — 
 
 | Addon | Original Version | Description |
 |---|---|---|
-| [SpellReplay](SpellReplay/) | WotLK 3.3.5a | Scrolling spell icon strip — shows your casted spells in order with damage, heals, resists, and auto-attacks |
+| [SpellReplay](SpellReplay/) | TBC/WotLK | Scrolling spell icon strip — shows your casted spells in order with damage, heals, resists, and auto-attacks |
 
 ## Install
 
