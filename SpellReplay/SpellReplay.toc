@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: SpellReplay
+## Author: Oldsalt (Smolderforge) | 1.12.1 Backport
+## Notes: Displays the spells you just casted and much more
+## DefaultState: enabled
+## SavedVariables: SpellReplaySaved
+SpellReplay.lua
