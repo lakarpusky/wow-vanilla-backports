@@ -8,7 +8,7 @@ A modern DPS and healing meter for **World of Warcraft 1.12.1 (Vanilla)**, heavi
 
 VanillaMeter is my personal take on what a DPS and healing meter should feel and look like in a vanilla client — clean, readable, and modern in spirit without requiring anything beyond the base 1.12.1 API.
 
-This is **not a competitor** to any existing vanilla meter. Addons like [DPSMate](https://github.com/Athos1972/DPSMate) and [ShaguDPS](https://gitlab.com/shagu/ShaguDPS) have been serving the community for years and are excellent. VanillaMeter exists as a different take on the same problem — one focused on a modern UI feel inspired by Details! — not as a replacement for either of them.
+This is **not a competitor** to any existing vanilla meter. Addons like [DPSMate](https://github.com/tdymel/DPSMate) and [ShaguDPS](https://github.com/shagu/ShaguDPS) have been serving the community for years and are excellent. VanillaMeter exists as a different take on the same problem — one focused on a modern UI feel inspired by Details! — not as a replacement for either of them.
 
 ---
 
