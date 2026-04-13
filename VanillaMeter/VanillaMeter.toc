@@ -1,0 +1,16 @@
+## Interface: 11200
+## Title: VanillaMeter
+## Notes: A modern DPS and Healing meter inspired by Details! for vanilla 1.12.1
+## Author: lakarpusky
+## Version: 0.2.0
+## SavedVariables: VanillaMeterDB
+
+core\core.lua
+core\parser.lua
+core\combat.lua
+core\data.lua
+ui\bars.lua
+ui\window.lua
+ui\tabs.lua
+ui\detach.lua
+ui\config.lua
