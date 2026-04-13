@@ -120,7 +120,7 @@ If you update VanillaMeter and want to apply new defaults cleanly, run this in-g
 
 ## Credits
 
-- **[Details! Damage Meter](https://www.curseforge.com/wow/addons/details)** by Tercioo — visual design inspiration, layout concepts, and UX approach that shaped what VanillaMeter aims to feel like
+- **[Details! Damage Meter](https://www.curseforge.com/wow/addons/details)** by Terciob — visual design inspiration, layout concepts, and UX approach that shaped what VanillaMeter aims to feel like
 - **[ShaguDPS](https://github.com/shagu/ShaguDPS)** by shagu — the GlobalStrings pattern-sanitization approach used in the combat log parser is directly based on ShaguDPS's proven method for locale-independent 1.12.1 parsing
 - **[DPSMate](https://github.com/tdymel/DPSMate)** by tdymel — referenced for combat event handling patterns and segment management concepts in vanilla
 
