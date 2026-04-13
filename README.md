@@ -9,6 +9,7 @@ Every addon here is written in strict Lua 5.0 with no external dependencies — 
 | Addon | Original Version | Description |
 |---|---|---|
 | [SpellReplay](SpellReplay/) | TBC/WotLK | Scrolling spell icon strip — shows your casted spells in order with damage, heals, resists, and auto-attacks |
+| [VanillaMeter](VanillaMeter/) | Original | Real-time DPS and healing meter with class icons, spell breakdown tooltips, detachable windows, and chat reporting |
 
 ## Install
 
