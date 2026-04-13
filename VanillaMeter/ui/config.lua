@@ -1,7 +1,6 @@
 ----------------------------------------------------------------------
 -- VanillaMeter - Config
--- Two-column panel: toggles (left) + report buttons in one row (right)
--- Reset Tabs Layout always at the bottom
+-- Two-column panel: toggles (left) + reset buttons (right)
 ----------------------------------------------------------------------
 
 local VM = VanillaMeter

@@ -15,7 +15,6 @@ Window.bars = {}
 Window.maxBars = 20
 Window.scrollOffset = 0
 Window.needsRefresh = true
-Window.visible = true
 
 -- Refresh throttle
 local REFRESH_INTERVAL = 0.5
@@ -258,7 +257,6 @@ function Window:LayoutBars()
 
   local db = VM.db.appearance
   local containerHeight = self.barContainer:GetHeight()
-  local containerWidth  = self.barContainer:GetWidth()
   local barHeight       = db.barHeight
   local barSpacing      = db.barSpacing
 
@@ -313,7 +311,7 @@ function Window:Refresh()
   -- Get the top value for percentage scaling
   local topValue = 0
   if sorted[1] then
-    topValue = sorted[1].total
+    topValue = sorted[1].rankValue or sorted[1].total
   end
 
   -- Update bars
@@ -339,10 +337,8 @@ function Window:Toggle()
 
   if self.frame:IsVisible() then
     self.frame:Hide()
-    self.visible = false
   else
     self.frame:Show()
-    self.visible = true
     self.needsRefresh = true
   end
 end

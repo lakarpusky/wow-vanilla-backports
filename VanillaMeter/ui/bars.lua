@@ -9,8 +9,6 @@ local VM = VanillaMeter
 VM.Bars = {}
 local Bars = VM.Bars
 
-Bars.pool = {}
-
 -- BantoBar texture for the fill gradient
 local BAR_FILL_PATH = "Interface\\AddOns\\VanillaMeter\\textures\\BantoBar"
 
@@ -99,16 +97,17 @@ function Bars:UpdateBar(bar, rank, data, maxValue, datatype)
   if not bar or not data then return end
 
   bar.data = data
+  bar.datatype = datatype
 
   local r, g, b = VM:GetClassColor(data.name)
 
   -- Always reserve icon space so bar visual area is consistently after the icon
   local iconW = bar.icon:GetWidth()
 
-  -- Calculate fill percentage
+  -- Calculate fill percentage based on rankValue (effective for heal, raw for damage)
   local pct = 0
   if maxValue > 0 then
-    pct = data.total / maxValue
+    pct = (data.rankValue or data.total) / maxValue
   end
 
   -- Fill width is within the bar area only (after icon)
@@ -164,8 +163,17 @@ function Bars:UpdateBar(bar, rank, data, maxValue, datatype)
   bar.nameText:SetText(data.name)
   bar.nameText:SetTextColor(r, g, b)
 
-  local label = datatype == "damage" and "DPS" or "HPS"
-  bar.valueText:SetText(VM:FormatNumber(data.total) .. " (" .. VM:FormatDPS(data.persec) .. " " .. label .. ")")
+  if datatype == "heal" then
+    local esum = data.esum or 0
+    bar.valueText:SetText(
+      VM:FormatNumber(esum) .. " / " .. VM:FormatNumber(data.total) ..
+      " (" .. VM:FormatDPS(data.persec) .. " HPS)"
+    )
+  else
+    bar.valueText:SetText(
+      VM:FormatNumber(data.total) .. " (" .. VM:FormatDPS(data.persec) .. " DPS)"
+    )
+  end
   bar.valueText:SetTextColor(1, 1, 1)
 
   bar:Show()
@@ -189,10 +197,21 @@ function Bars:ShowTooltip(bar)
 
   GameTooltip:AddLine(data.name .. "                    ", r, g, b)
 
-  local activeTab = VM.db.activeTab or "damage"
-  local label = activeTab == "damage" and "DPS" or "HPS"
-  GameTooltip:AddDoubleLine("Total:", VM:FormatNumber(data.total), 0.8, 0.8, 0.8, 1, 1, 1)
-  GameTooltip:AddDoubleLine(label .. ":", VM:FormatDPS(data.persec), 0.8, 0.8, 0.8, 1, 1, 1)
+  local activeTab = bar.datatype or VM.db.activeTab or "damage"
+
+  if activeTab == "heal" then
+    local esum      = data.esum or 0
+    local overheal  = data.total - esum
+    local effPct    = data.total > 0 and (esum / data.total * 100) or 0
+    local ovPct     = 100 - effPct
+    GameTooltip:AddDoubleLine("Total:",     VM:FormatNumber(data.total), 0.8, 0.8, 0.8, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Effective:", VM:FormatNumber(esum)     .. " (" .. string.format("%.0f%%", effPct) .. ")", 0.8, 0.8, 0.8, 0.6, 1.0, 0.6)
+    GameTooltip:AddDoubleLine("Overheal:",  VM:FormatNumber(overheal) .. " (" .. string.format("%.0f%%", ovPct)  .. ")", 0.8, 0.8, 0.8, 1.0, 0.5, 0.5)
+    GameTooltip:AddDoubleLine("HPS:",       VM:FormatDPS(data.persec), 0.8, 0.8, 0.8, 1, 1, 1)
+  else
+    GameTooltip:AddDoubleLine("Total:", VM:FormatNumber(data.total),   0.8, 0.8, 0.8, 1, 1, 1)
+    GameTooltip:AddDoubleLine("DPS:",   VM:FormatDPS(data.persec),     0.8, 0.8, 0.8, 1, 1, 1)
+  end
 
   local segment = VM.Data[activeTab]
   if segment and segment[1] then

@@ -261,7 +261,7 @@ function Detached:Create(modeId)
       win.scrollOffset = maxOffset
     end
 
-    local topValue = sorted[1] and sorted[1].total or 0
+    local topValue = sorted[1] and (sorted[1].rankValue or sorted[1].total) or 0
 
     for i = 1, maxBars do
       local bar = win.bars[i]

@@ -16,10 +16,6 @@ Data.damage = { [0] = {}, [1] = {} }
 Data.heal   = { [0] = {}, [1] = {} }
 Data.classes = {}
 
--- Sorted views (rebuilt on refresh)
-Data.sortedDamage = {}
-Data.sortedHeal   = {}
-
 ----------------------------------------------------------------------
 -- Trim helper
 ----------------------------------------------------------------------
@@ -41,8 +37,6 @@ function Data:Reset()
   self.damage = { [0] = {}, [1] = {} }
   self.heal   = { [0] = {}, [1] = {} }
   self.classes = {}
-  self.sortedDamage = {}
-  self.sortedHeal   = {}
 
   -- Trigger UI refresh
   if VM.Window and VM.Window.Refresh then
@@ -76,7 +70,7 @@ function Data:AddEntry(source, spell, target, value, school, datatype)
     VM.Combat:ShouldStartNewSegment()
   end
 
-  -- Calculate effective healing
+  -- Calculate effective healing (how much actually landed vs. overhealing)
   local effective = 0
   if datatype == "heal" then
     local unitstr = VM.Combat:UnitByName(target)
@@ -133,11 +127,8 @@ function Data:AddEntry(source, spell, target, value, school, datatype)
     local actor = entry[actualSource]
     if actor then
       actor[actualSpell] = (actor[actualSpell] or 0) + value
-      actor._sum = (actor._sum or 0) + value
-
-      if datatype == "heal" then
-        actor._esum = (actor._esum or 0) + effective
-      end
+      actor._sum  = (actor._sum  or 0) + value
+      actor._esum = (actor._esum or 0) + effective
 
       -- Combat time tracking
       actor._ctime = actor._ctime or 1
@@ -163,7 +154,9 @@ end
 -- Get sorted data for display
 -- segment: 0 = overall, 1 = current
 -- datatype: "damage" or "heal"
--- Returns: sorted array of { name, total, persec }
+-- Returns: sorted array of { name, total, esum, persec, rankValue, class }
+--   damage: rankValue = total,  persec = DPS
+--   heal:   rankValue = esum,   persec = effective HPS
 ----------------------------------------------------------------------
 function Data:GetSorted(datatype, segment)
   segment = segment or 1
@@ -173,24 +166,29 @@ function Data:GetSorted(datatype, segment)
 
   local entry = store[segment]
   local result = {}
+  local isHeal = (datatype == "heal")
 
   for name, actor in pairs(entry) do
     if type(actor) == "table" and actor._sum then
-      local total = actor._sum
-      local ctime = math.max(actor._ctime or 1, 1)
-      local persec = total / ctime
+      local total     = actor._sum
+      local esum      = actor._esum or 0
+      local ctime     = math.max(actor._ctime or 1, 1)
+      local rankValue = isHeal and esum or total
+      local persec    = rankValue / ctime
 
       table.insert(result, {
-        name   = name,
-        total  = total,
-        persec = persec,
-        class  = self.classes[name],
+        name      = name,
+        total     = total,
+        esum      = esum,
+        persec    = persec,
+        rankValue = rankValue,
+        class     = self.classes[name],
       })
     end
   end
 
-  -- Sort descending by total
-  table.sort(result, function(a, b) return a.total > b.total end)
+  -- Sort descending by rankValue (effective for heal, raw for damage)
+  table.sort(result, function(a, b) return a.rankValue > b.rankValue end)
 
   return result
 end

@@ -22,12 +22,6 @@ local INACTIVE_BG = { r = 0.08, g = 0.08, b = 0.08, a = 0.80 }
 local ACTIVE_TEXT   = { r = 1.0, g = 1.0, b = 1.0 }
 local INACTIVE_TEXT = { r = 0.5, g = 0.5, b = 0.5 }
 
--- Per-mode active background colors
-local MODE_COLORS = {
-  ["damage"]  = { r = 0.35, g = 0.12, b = 0.12, a = 0.95 },
-  ["heal"]    = { r = 0.12, g = 0.30, b = 0.12, a = 0.95 },
-}
-
 -- State
 Tabs.openTabs = {}    -- ordered list: { {id="damage", btn=frame}, ... }
 Tabs.addBtn = nil     -- the "+" button
@@ -118,7 +112,6 @@ function Tabs:CreateTabButton(modeId)
   local tabHeight = VM.TAB_HEIGHT
 
   local label = GetModeLabel(modeId)
-  local isPrimary = (table.getn(self.openTabs) == 0)
 
   local btn = CreateFrame("Button", "VanillaMeterTab_" .. modeId, titleBar)
   btn:SetHeight(tabHeight)
@@ -137,7 +130,6 @@ function Tabs:CreateTabButton(modeId)
   btn:SetWidth(math.max(40, btn.text:GetStringWidth() + 16))
 
   btn.modeId = modeId
-  btn.isPrimary = isPrimary
 
   -- Left click: switch to this tab, Right click: context menu
   btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -399,7 +391,6 @@ function Tabs:ShowAddContextMenu()
   end
 
   local menu = self.addContextMenu
-  local available = self:GetAvailableModes()
   UIDropDownMenu_Initialize(menu, function()
     for _, m in ipairs(available) do
       local info = UIDropDownMenu_CreateInfo()

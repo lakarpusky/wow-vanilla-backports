@@ -15,6 +15,7 @@ This is **not a competitor** to any existing vanilla meter. Addons like [DPSMate
 ## Features
 
 - **Real-time DPS and healing tracking** for players and pets in your group or raid
+- **Effective healing + overheal tracking** — healing bars display effective / raw split with HPS based on effective healing; tooltip shows Total, Effective %, and Overheal % per healer
 - **Dual tab system** — open Damage Done and Healing Done simultaneously, switch between them, or detach either into an independent floating window
 - **Class-colored bars** with class icons pulled from the game client
 - **Spell breakdown tooltip** — hover any bar to see a full spell-by-spell breakdown with percentages
@@ -113,7 +114,7 @@ If you update VanillaMeter and want to apply new defaults cleanly, run this in-g
 - **Parser:** Uses GlobalStrings-based pattern matching — locale-independent and compatible with all 1.12.1 clients
 - **Segments:** `[0]` = overall session, `[1]` = current fight
 - **Combat time:** Tracked per actor with a 3.5s gap threshold to handle out-of-combat periods accurately
-- **Effective healing:** Calculated against target's missing health at the time of each heal event
+- **Effective healing:** Calculated against target's missing health at the time of each heal event. Healing bars rank and rate by effective healing, not raw total — a healer who overheals ranks lower than one who lands the same raw numbers more efficiently. Bar value format: `effective / raw (HPS)`. Tooltip shows Total, Effective (%), and Overheal (%) with colour coding.
 
 ---
 

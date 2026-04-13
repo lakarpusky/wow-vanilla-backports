@@ -13,12 +13,8 @@ VM.version = "0.2.0"
 -- Shared UI constants (used across window, tabs, detach)
 VM.TAB_HEIGHT = 30
 
--- Addon loaded state
-VM.initialized = false
-
 -- Player info (populated on PLAYER_LOGIN)
 VM.playerName = nil
-VM.playerClass = nil
 
 ----------------------------------------------------------------------
 -- Default saved variables
@@ -26,7 +22,6 @@ VM.playerClass = nil
 VM.defaults = {
   -- Window layout
   window = {
-    mode = "merged",        -- "merged" or "split"
     width = 350,
     height = 170,
     maxWidth = 500,
@@ -41,11 +36,8 @@ VM.defaults = {
   appearance = {
     bgAlpha = 0.5,
     bgColor = { r = 0.05, g = 0.05, b = 0.05 },
-    borderColor = { r = 0, g = 0, b = 0, a = 1 },
-    barTexture = "Interface\\TargetingFrame\\UI-StatusBar",
     barHeight = 25,
     barSpacing = 3,
-    barAlpha = 1,
     classColors = true,
     showRank = true,
     transparent = false,
@@ -150,15 +142,11 @@ initFrame:SetScript("OnEvent", function()
 
   elseif event == "PLAYER_LOGIN" then
     VM.playerName = UnitName("player")
-    local _, class = UnitClass("player")
-    VM.playerClass = class
 
     -- Initialize subsystems (they register themselves during load)
     if VM.Combat then VM.Combat:Init() end
     if VM.Data then VM.Data:Init() end
     if VM.Window then VM.Window:Init() end
-
-    VM.initialized = true
 
     DEFAULT_CHAT_FRAME:AddMessage("|cff8080ffVanillaMeter|r v" .. VM.version .. " loaded. Type |cff80ff80/vm|r for options.")
   end
