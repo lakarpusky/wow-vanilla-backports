@@ -13,22 +13,11 @@
 
 ---------------------------------------------------------------------------
 -- Lua 5.0 utility helpers
+-- NOTE: maxn() removed — replaced by spellCount counter (see spellEntries state block)
 ---------------------------------------------------------------------------
 
-local function maxn(t)
-    local n = 0
-    for k, v in pairs(t) do
-        if type(k) == "number" and k > n then
-            n = k
-        end
-    end
-    return n
-end
-
 local function abs(x)
-    if x < 0 then
-        return -x
-    end
+    if x < 0 then return -x end
     return x
 end
 
@@ -36,21 +25,24 @@ end
 -- Spellbook icon cache
 -- Scans player spellbook to build a spellName -> iconTexture lookup.
 -- This is the 1.12.1 replacement for GetSpellInfo(id).
+--
+-- GetSpellNameByTexture() is O(1) instead of O(n) on every action press.
 ---------------------------------------------------------------------------
 
 local spellIconCache = {}
+local texIconCache   = {}
 
 local function ScanSpellbook()
     spellIconCache = {}
+    texIconCache   = {}
     local i = 1
     while true do
         local spellName, spellRank = GetSpellName(i, BOOKTYPE_SPELL)
-        if not spellName then
-            break
-        end
+        if not spellName then break end
         local tex = GetSpellTexture(i, BOOKTYPE_SPELL)
         if tex then
             spellIconCache[spellName] = tex
+            texIconCache[tex]         = spellName
         end
         i = i + 1
     end
@@ -58,12 +50,11 @@ local function ScanSpellbook()
     i = 1
     while true do
         local spellName, spellRank = GetSpellName(i, BOOKTYPE_PET)
-        if not spellName then
-            break
-        end
+        if not spellName then break end
         local tex = GetSpellTexture(i, BOOKTYPE_PET)
         if tex then
             spellIconCache[spellName] = tex
+            texIconCache[tex]         = spellName
         end
         i = i + 1
     end
@@ -74,15 +65,9 @@ local function GetSpellIcon(name)
     return spellIconCache[name]
 end
 
--- Reverse lookup: texture path -> spell name (for UseAction hook)
 local function GetSpellNameByTexture(tex)
     if not tex then return nil end
-    for name, cachedTex in pairs(spellIconCache) do
-        if cachedTex == tex then
-            return name
-        end
-    end
-    return nil
+    return texIconCache[tex]
 end
 
 ---------------------------------------------------------------------------
@@ -111,10 +96,17 @@ local SR_DEFAULTS = {
     showWhite   = 2,    -- 0=off, 1=melee, 2=ranged, 3=both
 }
 
+--         enabled=0, which wiped all settings every login when the addon was
+--         disabled. Changed to `== nil` to only reset truly missing keys.
+--
+--         in keys that are missing. New default keys added in future versions
+--         will be picked up without blowing away existing user settings.
 local function SR_InitSettings()
-    if type(SpellReplaySaved) ~= "table" or not SpellReplaySaved.enabled then
+    if type(SpellReplaySaved) ~= "table" then
         SpellReplaySaved = {}
-        for k, v in pairs(SR_DEFAULTS) do
+    end
+    for k, v in pairs(SR_DEFAULTS) do
+        if SpellReplaySaved[k] == nil then
             SpellReplaySaved[k] = v
         end
     end
@@ -142,7 +134,7 @@ ReplayBackground:SetAllPoints(ReplayFrame)
 ReplayBackground:SetTexture(0, 0, 0, 0.15)
 
 -- Mouse handlers for dragging and right-click lock toggle
--- NOTE: function() with NO parameters - Lua 5.0 rule
+-- NOTE: function() with NO parameters — Lua 5.0 rule
 ReplayFrame:SetScript("OnMouseDown", function()
     if not S() then return end
     if arg1 == "LeftButton" and S().locked == 0 then
@@ -178,18 +170,39 @@ end)
 
 ---------------------------------------------------------------------------
 -- Spell tracking state
+--
+--
+--   Before (mismatched indexing):
+--     replayTexture[]    — 0-indexed  (replayTexture[0] = first spell)
+--     replayRank[]       — 0-indexed
+--     replayDamage[]     — 0-indexed
+--     replayFont[]       — 0-indexed
+--     replayFailTexture[]— 0-indexed
+--     spellTable[]       — 1-indexed  (spellTable[1]    = first spell)
+--     timestampTable[]   — 1-indexed
+--     → replayTexture[i] corresponded to spellTable[i+1], a constant
+--       off-by-one that was a latent maintenance hazard throughout.
+--
+--   After (unified, 1-indexed):
+--     spellEntries[i] = {
+--         tex     = <Texture>,
+--         rank    = <FontString or nil>,
+--         damage  = <FontString or nil>,
+--         font    = <FontString or nil>,
+--         failTex = <Texture or nil>,
+--         name    = <string>,
+--         time    = <number>,
+--     }
+--
+--         replacing all maxn(spellTable) calls. maxn() iterated the full
+--         table on every frame tick and every overlay lookup — now O(1).
 ---------------------------------------------------------------------------
 
-local replayTexture = {}
-local replayRank = {}
-local replayDamage = {}
-local replayFont = {}
-local replayFailTexture = {}
-local spellTable = {}
-local timestampTable = {}
-local movSpeed = 0
-local endPos = 0
-local isCasting = false
+local spellEntries = {}
+local spellCount   = 0
+local movSpeed     = 0
+local endPos       = 0
+local isCasting    = false
 
 ---------------------------------------------------------------------------
 -- Helper: get the X offset from a texture's anchor point
@@ -213,82 +226,60 @@ local function AddSpellToStrip(spellName, iconPath, rankText)
     end
     if not iconPath then return end
 
-    local count = maxn(spellTable)
+    local count = spellCount
+
+    local tex = ReplayFrame:CreateTexture(nil, "ARTWORK")
+    tex:Hide()
+    tex:SetWidth(40)
+    tex:SetHeight(40)
+    tex:SetTexture(iconPath)
+    if S().cropTex == 1 then
+        tex:SetTexCoord(0.06, 0.94, 0.06, 0.94)
+    end
 
     if count == 0 then
-        -- First spell: create texture at index 0
-        replayTexture[0] = ReplayFrame:CreateTexture(nil, "ARTWORK")
-        replayTexture[0]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", 0, 0)
-        replayTexture[0]:Hide()
-        replayTexture[0]:SetWidth(40)
-        replayTexture[0]:SetHeight(40)
-        replayTexture[0]:SetTexture(iconPath)
-        if S().cropTex == 1 then
-            replayTexture[0]:SetTexCoord(0.06, 0.94, 0.06, 0.94)
-        end
-        spellTable[1] = spellName
-        timestampTable[1] = GetTime()
+        -- First spell: anchor at origin
+        tex:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", 0, 0)
+        spellEntries[1] = { tex = tex, name = spellName, time = GetTime() }
     else
         -- Duplicate suppression: same spell within 0.5s
-        if spellName == spellTable[count] and (GetTime() - timestampTable[count]) < 0.5 then
+        local prev = spellEntries[count]
+        if prev and spellName == prev.name and (GetTime() - prev.time) < 0.5 then
+            tex:Hide()  -- clean up the texture we pre-created
             return
         end
 
-        local i = count
-        replayTexture[i] = ReplayFrame:CreateTexture(nil, "ARTWORK")
-
-        -- Position relative to previous icon
-        local prevX = 0
-        if replayTexture[i - 1] then
-            prevX = GetOfsX(replayTexture[i - 1])
-        end
-
+        -- Position relative to the previous icon
+        local prevX = (prev and prev.tex) and GetOfsX(prev.tex) or 0
+        local newOfsX
         if S().direction == 1 then
-            -- Scrolling right
-            if not replayTexture[i - 1] or prevX > 40 then
-                replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", 0, 0)
-            else
-                replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", prevX - 40, 0)
-            end
+            -- Scrolling right: new icons stack to the left
+            newOfsX = (not prev or prevX > 40) and 0 or (prevX - 40)
         else
-            -- Scrolling left
-            if not replayTexture[i - 1] or prevX < -40 then
-                replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", 0, 0)
-            else
-                replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", prevX + 40, 0)
-            end
+            -- Scrolling left: new icons stack to the right
+            newOfsX = (not prev or prevX < -40) and 0 or (prevX + 40)
         end
-
-        replayTexture[i]:Hide()
-        replayTexture[i]:SetWidth(40)
-        replayTexture[i]:SetHeight(40)
-        replayTexture[i]:SetTexture(iconPath)
-        if S().cropTex == 1 then
-            replayTexture[i]:SetTexCoord(0.06, 0.94, 0.06, 0.94)
-        end
-
-        spellTable[i + 1] = spellName
-        timestampTable[i + 1] = GetTime()
+        tex:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", newOfsX, 0)
+        spellEntries[count + 1] = { tex = tex, name = spellName, time = GetTime() }
     end
 
+    spellCount = spellCount + 1
+
     -- Add rank label if configured
-    local idx = maxn(spellTable) - 1
-    if rankText and S().showRanks ~= 0 and replayTexture[idx] then
+    local idx = spellCount
+    local entry = spellEntries[idx]
+    if rankText and S().showRanks ~= 0 and entry and entry.tex then
         local _, _, rankNum = string.find(rankText, "(%d+)")
         if rankNum then
-            local shouldShow = false
-            if S().showRanks == 1 then
-                shouldShow = true
-            elseif S().showRanks == 2 and rankNum == "1" then
-                shouldShow = true
-            end
+            local shouldShow = (S().showRanks == 1) or (S().showRanks == 2 and rankNum == "1")
             if shouldShow then
-                replayRank[idx] = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-                replayRank[idx]:SetPoint("CENTER", replayTexture[idx], "CENTER", 0, 28)
-                replayRank[idx]:SetFont("Fonts\\FRIZQT__.TTF", 9)
-                replayRank[idx]:SetJustifyH("CENTER")
-                replayRank[idx]:SetText("|cff107be5R" .. rankNum)
-                replayRank[idx]:Hide()
+                local fs = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+                fs:SetPoint("CENTER", entry.tex, "CENTER", 0, 28)
+                fs:SetFont("Fonts\\FRIZQT__.TTF", 9)
+                fs:SetJustifyH("CENTER")
+                fs:SetText("|cff107be5R" .. rankNum)
+                fs:Hide()
+                entry.rank = fs
             end
         end
     end
@@ -300,41 +291,43 @@ end
 
 local function AddDamageOverlay(spellName, amount, isCritical, isHeal)
     if not S() then return end
-    if isHeal and S().showHeals == 0 then return end
+    if isHeal     and S().showHeals  == 0 then return end
     if not isHeal and S().showDamage == 0 then return end
     if not isCritical then
-        if isHeal and S().showHeals == 2 then return end
+        if isHeal     and S().showHeals  == 2 then return end
         if not isHeal and S().showDamage == 2 then return end
     end
 
-    for i = maxn(spellTable), 0, -1 do
-        if spellTable[i] == spellName and replayTexture[i - 1] and not replayDamage[i - 1] and not replayFont[i - 1] then
-            replayDamage[i - 1] = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-            replayDamage[i - 1]:SetJustifyH("CENTER")
+    for i = spellCount, 1, -1 do
+        local e = spellEntries[i]
+        if e and e.name == spellName and e.tex and not e.damage and not e.font then
+            local fs = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+            fs:SetJustifyH("CENTER")
 
             local color, prefix
             if isHeal then
-                color = "|cff00b200"
+                color  = "|cff00b200"
                 prefix = "+"
             else
-                color = "|cffffff00"
+                color  = "|cffffff00"
                 prefix = ""
             end
 
             if isCritical then
-                replayDamage[i - 1]:SetFont("Fonts\\FRIZQT__.TTF", 12)
-                replayDamage[i - 1]:SetPoint("CENTER", replayTexture[i - 1], "CENTER", 0, -26)
+                fs:SetFont("Fonts\\FRIZQT__.TTF", 12)
+                fs:SetPoint("CENTER", e.tex, "CENTER", 0, -26)
             else
-                replayDamage[i - 1]:SetFont("Fonts\\FRIZQT__.TTF", 9)
-                replayDamage[i - 1]:SetPoint("CENTER", replayTexture[i - 1], "CENTER", 0, -25)
+                fs:SetFont("Fonts\\FRIZQT__.TTF", 9)
+                fs:SetPoint("CENTER", e.tex, "CENTER", 0, -25)
             end
-            replayDamage[i - 1]:SetText(color .. prefix .. amount)
+            fs:SetText(color .. prefix .. amount)
 
-            -- Hide if scrolled past visible area
-            local ofsX = GetOfsX(replayTexture[i - 1])
+            -- Hide if the icon has already scrolled past the visible area
+            local ofsX = GetOfsX(e.tex)
             if (S().direction == 1 and ofsX < 0) or (S().direction == 2 and ofsX > 0) then
-                replayDamage[i - 1]:Hide()
+                fs:Hide()
             end
+            e.damage = fs
             break
         end
     end
@@ -342,18 +335,18 @@ end
 
 local function AddManaOverlay(spellName, amount)
     if not S() or S().showMana ~= 1 then return end
-    local i = maxn(spellTable)
-    if spellTable[i] == spellName and replayTexture[i - 1] and not replayDamage[i - 1] then
-        replayDamage[i - 1] = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        replayDamage[i - 1]:SetPoint("CENTER", replayTexture[i - 1], "CENTER", 0, -25)
-        replayDamage[i - 1]:SetJustifyH("CENTER")
-        replayDamage[i - 1]:SetFont("Fonts\\FRIZQT__.TTF", 9)
-        replayDamage[i - 1]:SetText("|cff0080ff+" .. amount)
-
-        local ofsX = GetOfsX(replayTexture[i - 1])
+    local e = spellEntries[spellCount]
+    if e and e.name == spellName and e.tex and not e.damage then
+        local fs = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        fs:SetPoint("CENTER", e.tex, "CENTER", 0, -25)
+        fs:SetJustifyH("CENTER")
+        fs:SetFont("Fonts\\FRIZQT__.TTF", 9)
+        fs:SetText("|cff0080ff+" .. amount)
+        local ofsX = GetOfsX(e.tex)
         if (S().direction == 1 and ofsX < 0) or (S().direction == 2 and ofsX > 0) then
-            replayDamage[i - 1]:Hide()
+            fs:Hide()
         end
+        e.damage = fs
     end
 end
 
@@ -361,27 +354,30 @@ local function AddResistOverlay(spellName, missType)
     if not S() or S().showResists ~= 1 then return end
 
     if S().resistFrame == 1 then
-        for i = maxn(spellTable), 0, -1 do
-            if replayTexture[i - 1] and not replayFont[i - 1] then
+        for i = spellCount, 1, -1 do
+            local e = spellEntries[i]
+            if e and e.tex and not e.font then
                 local icon = GetSpellIcon(spellName)
-                if icon and replayTexture[i - 1]:GetTexture() == icon then
-                    replayFailTexture[i - 1] = ReplayFrame:CreateTexture(nil, "OVERLAY")
-                    replayFailTexture[i - 1]:SetPoint("CENTER", replayTexture[i - 1], "CENTER", 0, 0)
-                    replayFailTexture[i - 1]:SetWidth(35)
-                    replayFailTexture[i - 1]:SetHeight(35)
-                    replayFailTexture[i - 1]:SetTexture("Interface\\AddOns\\SpellReplay\\RedCross")
+                if icon and e.tex:GetTexture() == icon then
+                    local cross = ReplayFrame:CreateTexture(nil, "OVERLAY")
+                    cross:SetPoint("CENTER", e.tex, "CENTER", 0, 0)
+                    cross:SetWidth(35)
+                    cross:SetHeight(35)
+                    cross:SetTexture("Interface\\AddOns\\SpellReplay\\RedCross")
 
-                    replayFont[i - 1] = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-                    replayFont[i - 1]:SetPoint("CENTER", replayTexture[i - 1], "CENTER", 0, -26)
-                    replayFont[i - 1]:SetFont("Fonts\\FRIZQT__.TTF", 8)
-                    replayFont[i - 1]:SetJustifyH("CENTER")
-                    replayFont[i - 1]:SetText("|cffffa500" .. missType)
+                    local fs = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+                    fs:SetPoint("CENTER", e.tex, "CENTER", 0, -26)
+                    fs:SetFont("Fonts\\FRIZQT__.TTF", 8)
+                    fs:SetJustifyH("CENTER")
+                    fs:SetText("|cffffa500" .. missType)
 
-                    local ofsX = GetOfsX(replayTexture[i - 1])
+                    local ofsX = GetOfsX(e.tex)
                     if (S().direction == 1 and ofsX < 0) or (S().direction == 2 and ofsX > 0) then
-                        replayFailTexture[i - 1]:Hide()
-                        replayFont[i - 1]:Hide()
+                        cross:Hide()
+                        fs:Hide()
                     end
+                    e.failTex = cross
+                    e.font    = fs
                     break
                 end
             end
@@ -399,7 +395,7 @@ end
 ---------------------------------------------------------------------------
 
 local lastAddedSpell = nil
-local lastAddedTime = 0
+local lastAddedTime  = 0
 
 local function TryAddSpell(spellName, rankText)
     if not spellName or spellName == "" then return end
@@ -411,28 +407,26 @@ local function TryAddSpell(spellName, rankText)
     if spellName == "Auto Shot" or spellName == "Shoot" then
         if not S() then return end
         if S().showWhite == 2 or S().showWhite == 3 then
-            local tex = GetInventoryItemTexture("player", 18) -- ranged slot
+            local tex = GetInventoryItemTexture("player", 18)  -- ranged slot
             if tex then
                 AddSpellToStrip(spellName, tex, nil)
                 lastAddedSpell = spellName
-                lastAddedTime = GetTime()
+                lastAddedTime  = GetTime()
             end
         end
         return
     end
-    -- Melee auto-attack: handled by ParseMeleeHit, not here
-    if spellName == "Attack" then
-        return
-    end
+    -- Melee auto-attack: handled by AddMeleeAutoAttack, not here
+    if spellName == "Attack" then return end
     local icon = GetSpellIcon(spellName)
     if icon then
         AddSpellToStrip(spellName, icon, rankText)
         lastAddedSpell = spellName
-        lastAddedTime = GetTime()
+        lastAddedTime  = GetTime()
     end
 end
 
--- Dedicated function for melee auto-attack (weapon icon + druid forms)
+-- Dedicated function for melee auto-attack (weapon icon + druid form support)
 local function AddMeleeAutoAttack()
     if not S() then return end
     if S().showWhite ~= 1 and S().showWhite ~= 3 then return end
@@ -446,20 +440,20 @@ local function AddMeleeAutoAttack()
     local _, playerClass = UnitClass("player")
     if playerClass == "DRUID" then
         local form = GetShapeshiftForm()
-        if form == 3 then -- cat form
+        if form == 3 then  -- cat form
             tex = "Interface\\Icons\\Ability_Druid_CatFormAttack"
-        elseif form == 1 then -- bear form
+        elseif form == 1 then  -- bear form
             tex = "Interface\\Icons\\Ability_Druid_Swipe"
         end
     end
     -- Default: main hand weapon icon
     if not tex then
-        tex = GetInventoryItemTexture("player", 16) -- main hand slot
+        tex = GetInventoryItemTexture("player", 16)  -- main hand slot
     end
     if tex then
         AddSpellToStrip(spellName, tex, nil)
         lastAddedSpell = spellName
-        lastAddedTime = GetTime()
+        lastAddedTime  = GetTime()
     end
 end
 
@@ -558,15 +552,16 @@ local function ParsePetDamage(msg)
     local icon = GetSpellIcon(petSpell)
     if not icon then return end
     AddSpellToStrip(petSpell, icon, nil)
-    -- Tag as PET
-    local idx = maxn(spellTable) - 1
-    if replayTexture[idx] and not replayRank[idx] then
-        replayRank[idx] = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        replayRank[idx]:SetPoint("CENTER", replayTexture[idx], "CENTER", 0, 28)
-        replayRank[idx]:SetFont("Fonts\\FRIZQT__.TTF", 9)
-        replayRank[idx]:SetJustifyH("CENTER")
-        replayRank[idx]:SetText("|cff2e8b57PET")
-        replayRank[idx]:Hide()
+    -- Tag the newly-added entry as PET
+    local e = spellEntries[spellCount]
+    if e and e.tex and not e.rank then
+        local fs = ReplayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        fs:SetPoint("CENTER", e.tex, "CENTER", 0, 28)
+        fs:SetFont("Fonts\\FRIZQT__.TTF", 9)
+        fs:SetJustifyH("CENTER")
+        fs:SetText("|cff2e8b57PET")
+        fs:Hide()
+        e.rank = fs
     end
 end
 
@@ -607,81 +602,89 @@ end
 ---------------------------------------------------------------------------
 -- OnUpdate: scroll spell icons across the frame
 -- Mirrors the original WotLK scrolling logic
+--
+--         is now 1 (not 0) to match the unified 1-indexed table
 ---------------------------------------------------------------------------
 
 local SR_UpdateFrame = CreateFrame("Frame", "SpellReplayUpdateFrame")
 
 SR_UpdateFrame:SetScript("OnUpdate", function()
-    -- arg1 = elapsed time (implicit global in 1.12.1 OnUpdate)
     local elapsed = arg1
-    if not S() then return end
-    local count = maxn(spellTable)
+    local s = S()
+    if not s then return end
+
+    local count = spellCount
     if count <= 0 then return end
-    local topIdx = count - 1
-    if not replayTexture[topIdx] then return end
 
-    local dir = S().direction
-    local topOfsX = GetOfsX(replayTexture[topIdx])
+    local topIdx = count
+    if not spellEntries[topIdx] or not spellEntries[topIdx].tex then return end
 
+    local dir      = s.direction
+    local topOfsX  = GetOfsX(spellEntries[topIdx].tex)
+
+    -- Choose movement speed based on scroll state
     if dir == 1 then
-        endPos = S().maxSpells * 40
+        endPos = s.maxSpells * 40
         if topOfsX < 0 then
-            movSpeed = S().pushSpeed
+            movSpeed = s.pushSpeed
         elseif isCasting then
-            movSpeed = S().castSpeed
+            movSpeed = s.castSpeed
         else
-            movSpeed = S().baseSpeed
+            movSpeed = s.baseSpeed
         end
     else
-        endPos = -(S().maxSpells * 40)
+        endPos = -(s.maxSpells * 40)
         if topOfsX > 0 then
-            movSpeed = -(S().pushSpeed)
+            movSpeed = -(s.pushSpeed)
         elseif isCasting then
-            movSpeed = -(S().castSpeed)
+            movSpeed = -(s.castSpeed)
         else
-            movSpeed = -(S().baseSpeed)
+            movSpeed = -(s.baseSpeed)
         end
     end
 
-    for i = topIdx, 0, -1 do
-        if not replayTexture[i] then
+    for i = topIdx, 1, -1 do
+        local e = spellEntries[i]
+        if not e or not e.tex then
             break
         end
 
-        local ofsX = GetOfsX(replayTexture[i])
+        local ofsX = GetOfsX(e.tex)
+        local newX  = ofsX + movSpeed * elapsed
 
-        -- Show icons crossing into visible area
-        if not replayTexture[i]:IsShown() then
+        -- Show icons that cross into the visible area
+        if not e.tex:IsShown() then
             if (dir == 1 and ofsX > 0) or (dir == 2 and ofsX < 0) then
-                replayTexture[i]:Show()
-                if replayRank[i] then replayRank[i]:Show() end
-                if replayDamage[i] then replayDamage[i]:Show() end
-                if replayFont[i] then replayFont[i]:Show() end
-                if replayFailTexture[i] then replayFailTexture[i]:Show() end
+                e.tex:Show()
+                if e.rank    then e.rank:Show()    end
+                if e.damage  then e.damage:Show()  end
+                if e.font    then e.font:Show()    end
+                if e.failTex then e.failTex:Show() end
             end
         end
 
-        -- Move towards end, with fade zone
         if (dir == 1 and ofsX < endPos - 20) or (dir == 2 and ofsX > endPos + 20) then
             -- Still scrolling normally
-            replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", ofsX + movSpeed * elapsed, 0)
+            e.tex:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", newX, 0)
+
         elseif (dir == 1 and ofsX < endPos) or (dir == 2 and ofsX > endPos) then
-            -- Fade zone: approaching end
-            replayTexture[i]:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", ofsX + movSpeed * elapsed, 0)
+            -- Fade zone: approaching end position
+            e.tex:SetPoint("TOPLEFT", ReplayFrame, "TOPLEFT", newX, 0)
             local alpha = abs(endPos - ofsX) / 20
-            replayTexture[i]:SetAlpha(alpha)
-            if replayRank[i] then replayRank[i]:SetAlpha(alpha) end
-            if replayDamage[i] then replayDamage[i]:SetAlpha(alpha) end
-            if replayFont[i] then replayFont[i]:SetAlpha(alpha) end
-            if replayFailTexture[i] then replayFailTexture[i]:SetAlpha(alpha) end
+            e.tex:SetAlpha(alpha)
+            if e.rank    then e.rank:SetAlpha(alpha)    end
+            if e.damage  then e.damage:SetAlpha(alpha)  end
+            if e.font    then e.font:SetAlpha(alpha)    end
+            if e.failTex then e.failTex:SetAlpha(alpha) end
+
         else
-            -- Past end: clean up
-            replayTexture[i]:Hide()
-            replayTexture[i] = nil
-            if replayRank[i] then replayRank[i]:Hide() replayRank[i] = nil end
-            if replayDamage[i] then replayDamage[i]:Hide() replayDamage[i] = nil end
-            if replayFont[i] then replayFont[i]:Hide() replayFont[i] = nil end
-            if replayFailTexture[i] then replayFailTexture[i]:Hide() replayFailTexture[i] = nil end
+            -- Past end position: hide and release
+            e.tex:Hide()
+            if e.rank    then e.rank:Hide()    end
+            if e.damage  then e.damage:Hide()  end
+            if e.font    then e.font:Hide()    end
+            if e.failTex then e.failTex:Hide() end
+            spellEntries[i] = nil
         end
     end
 end)
@@ -695,13 +698,38 @@ end)
 -- Reference: Chronometer addon on TurtleWoW wiki uses this exact pattern.
 ---------------------------------------------------------------------------
 
-local SR_orig_UseAction = nil
+local SR_orig_UseAction       = nil
 local SR_orig_CastSpellByName = nil
-local SR_orig_CastSpell = nil
+local SR_orig_CastSpell       = nil
+
+-- Returns true if it is valid to show the icon for a spell cast attempt.
+-- Uses IsSpellInRange against "target" first, then falls back to "player"
+-- to distinguish self-cast / AoE spells (no target needed) from spells that
+-- genuinely require a target and were pressed into the void.
+--
+-- IsSpellInRange return values:
+--   1   = spell has a range req and target is in range
+--   0   = spell has a range req and target is out of range
+--   nil = spell is self-cast/AoE, unit doesn't exist, or wrong unit type
+local function IsSpellShowable(spellName)
+    local inRange = IsSpellInRange(spellName, "target")
+    if inRange == 1 then return true end
+    if inRange == 0 then return false end
+    -- nil branch: could be self/AoE or no valid target.
+    -- A non-nil result on "player" means the spell can be cast on self
+    -- (self-buffs, AoE, etc.) and is always valid to show.
+    if IsSpellInRange(spellName, "player") ~= nil then return true end
+    -- Spell needs a target — only show if one actually exists.
+    return UnitExists("target")
+end
 
 local function SR_InstallHooks()
     -- Hook UseAction(slot, checkCursor, onSelf)
-    -- Called when player clicks an action button or presses a keybind
+    -- Called when player clicks an action button or presses a keybind.
+    -- Uses the slot-based ActionHasRange + IsActionInRange pair which is
+    -- more direct than IsSpellInRange for action bar buttons:
+    --   ActionHasRange(slot) == 1  → spell requires a target
+    --   IsActionInRange(slot) ~= 1 → out of range (0) or no target (nil)
     if not SR_orig_UseAction then
         SR_orig_UseAction = UseAction
         UseAction = function(slot, checkCursor, onSelf)
@@ -711,15 +739,11 @@ local function SR_InstallHooks()
                 local tex = GetActionTexture(slot)
                 if tex then
                     if IsAttackAction(slot) then
-                        -- Melee auto-attack button pressed
                         AddMeleeAutoAttack()
-                    elseif IsAutoRepeatAction(slot) then
-                        -- Auto Shot / Shoot / Wand button pressed
-                        local spellName = GetSpellNameByTexture(tex)
-                        if spellName then
-                            TryAddSpell(spellName, nil)
-                        end
                     else
+                        if ActionHasRange(slot) and IsActionInRange(slot) ~= 1 then
+                            return SR_orig_UseAction(slot, checkCursor, onSelf)
+                        end
                         local spellName = GetSpellNameByTexture(tex)
                         if spellName then
                             TryAddSpell(spellName, nil)
@@ -737,12 +761,12 @@ local function SR_InstallHooks()
         SR_orig_CastSpellByName = CastSpellByName
         CastSpellByName = function(name, onSelf)
             if name then
-                -- Strip rank if present: "Flash Heal(Rank 2)" -> "Flash Heal"
+                -- Strip rank suffix if present: "Flash Heal(Rank 2)" -> "Flash Heal"
                 local _, _, cleanName = string.find(name, "^(.+)%(")
-                if not cleanName then
-                    cleanName = name
+                if not cleanName then cleanName = name end
+                if IsSpellShowable(cleanName) then
+                    TryAddSpell(cleanName, nil)
                 end
-                TryAddSpell(cleanName, nil)
             end
             return SR_orig_CastSpellByName(name, onSelf)
         end
@@ -755,7 +779,7 @@ local function SR_InstallHooks()
         CastSpell = function(id, bookType)
             if id and bookType then
                 local spellName = GetSpellName(id, bookType)
-                if spellName then
+                if spellName and IsSpellShowable(spellName) then
                     TryAddSpell(spellName, nil)
                 end
             end
@@ -821,8 +845,12 @@ SR_EventFrame:SetScript("OnEvent", function()
         return
     end
 
+    -- Previously this only set isCasting=true and dropped arg1, so channeled
+    -- spells with no damage output (Mind Control, Drain Mana, Hypnotize, etc.)
+    -- were silently never shown in the strip.
     if event == "SPELLCAST_CHANNEL_START" then
         isCasting = true
+        if arg1 then TryAddSpell(arg1, nil) end
         return
     end
 
@@ -881,9 +909,7 @@ SLASH_SPELLREPLAY1 = "/spellreplay"
 SLASH_SPELLREPLAY2 = "/sr"
 
 local function SR_OnOff(val)
-    if val == 1 then
-        return "|cff00ff00ON|r"
-    end
+    if val == 1 then return "|cff00ff00ON|r" end
     return "|cffff0000OFF|r"
 end
 
@@ -959,7 +985,7 @@ SlashCmdList["SPELLREPLAY"] = function(msg)
     -- Parse "command arg" from msg using string.find (Lua 5.0 safe)
     local _, _, cmd, cmdArg = string.find(msg, "^(%S+)%s*(.*)")
     if not cmd then
-        cmd = msg
+        cmd    = msg
         cmdArg = ""
     end
     cmd = strlower(cmd)
