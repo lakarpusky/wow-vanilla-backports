@@ -1,4 +1,4 @@
-# wow-vanilla-backports
+# Wow Vanilla Backports
 
 A collection of WoW addons backported to the **1.12.1 vanilla client** for use on [TurtleWoW](https://turtlecraft.gg/) and other private servers.
 
