@@ -702,51 +702,35 @@ local SR_orig_UseAction       = nil
 local SR_orig_CastSpellByName = nil
 local SR_orig_CastSpell       = nil
 
--- Returns true if it is valid to show the icon for a spell cast attempt.
--- Uses IsSpellInRange against "target" first, then falls back to "player"
--- to distinguish self-cast / AoE spells (no target needed) from spells that
--- genuinely require a target and were pressed into the void.
---
--- IsSpellInRange return values:
---   1   = spell has a range req and target is in range
---   0   = spell has a range req and target is out of range
---   nil = spell is self-cast/AoE, unit doesn't exist, or wrong unit type
-local function IsSpellShowable(spellName)
-    local inRange = IsSpellInRange(spellName, "target")
-    if inRange == 1 then return true end
-    if inRange == 0 then return false end
-    -- nil branch: could be self/AoE or no valid target.
-    -- A non-nil result on "player" means the spell can be cast on self
-    -- (self-buffs, AoE, etc.) and is always valid to show.
-    if IsSpellInRange(spellName, "player") ~= nil then return true end
-    -- Spell needs a target — only show if one actually exists.
-    return UnitExists("target")
-end
-
 local function SR_InstallHooks()
     -- Hook UseAction(slot, checkCursor, onSelf)
     -- Called when player clicks an action button or presses a keybind.
-    -- Uses the slot-based ActionHasRange + IsActionInRange pair which is
-    -- more direct than IsSpellInRange for action bar buttons:
-    --   ActionHasRange(slot) == 1  → spell requires a target
-    --   IsActionInRange(slot) ~= 1 → out of range (0) or no target (nil)
+    --
+    -- Range check uses the slot-based APIs confirmed in vanilla 1.12.1:
+    --   ActionHasRange(slot) — returns 1 if the spell has a numeric range
+    --     requirement shown in its tooltip (e.g. Fire Blast 20yd). Returns nil
+    --     for melee abilities (Attack, Heroic Strike) which have no listed range.
+    --   IsActionInRange(slot) — returns 0 if out of range, 1 if in range,
+    --     nil if no target or range does not apply.
+    --
+    -- We only suppress the icon when ActionHasRange confirms a range requirement
+    -- AND IsActionInRange returns 0 (explicitly out of range). A nil from
+    -- IsActionInRange means either no target or range not applicable — in both
+    -- cases we let the icon through.
     if not SR_orig_UseAction then
         SR_orig_UseAction = UseAction
         UseAction = function(slot, checkCursor, onSelf)
             if slot and HasAction(slot) and not GetActionText(slot) then
-                -- GetActionText returns non-nil for macros; we skip macros
-                -- because the macro itself will call CastSpellByName
                 local tex = GetActionTexture(slot)
                 if tex then
                     if IsAttackAction(slot) then
                         AddMeleeAutoAttack()
                     else
-                        if ActionHasRange(slot) and IsActionInRange(slot) ~= 1 then
-                            return SR_orig_UseAction(slot, checkCursor, onSelf)
-                        end
-                        local spellName = GetSpellNameByTexture(tex)
-                        if spellName then
-                            TryAddSpell(spellName, nil)
+                        if not (ActionHasRange(slot) and IsActionInRange(slot) == 0) then
+                            local spellName = GetSpellNameByTexture(tex)
+                            if spellName then
+                                TryAddSpell(spellName, nil)
+                            end
                         end
                     end
                 end
@@ -755,33 +739,29 @@ local function SR_InstallHooks()
         end
     end
 
-    -- Hook CastSpellByName(name, onSelf)
-    -- Called from macros and scripts
+    -- Hook CastSpellByName(name, onSelf) — called from macros and scripts.
+    -- No range check here: macros handle their own targeting logic and
+    -- calling IsSpellInRange inside this hook risks blocking the original
+    -- if any error occurs before the return.
     if not SR_orig_CastSpellByName then
         SR_orig_CastSpellByName = CastSpellByName
         CastSpellByName = function(name, onSelf)
             if name then
-                -- Strip rank suffix if present: "Flash Heal(Rank 2)" -> "Flash Heal"
                 local _, _, cleanName = string.find(name, "^(.+)%(")
                 if not cleanName then cleanName = name end
-                if IsSpellShowable(cleanName) then
-                    TryAddSpell(cleanName, nil)
-                end
+                TryAddSpell(cleanName, nil)
             end
             return SR_orig_CastSpellByName(name, onSelf)
         end
     end
 
-    -- Hook CastSpell(spellID, bookType)
-    -- Called when casting by spellbook index
+    -- Hook CastSpell(spellID, bookType) — called when casting by spellbook index.
     if not SR_orig_CastSpell then
         SR_orig_CastSpell = CastSpell
         CastSpell = function(id, bookType)
             if id and bookType then
                 local spellName = GetSpellName(id, bookType)
-                if spellName and IsSpellShowable(spellName) then
-                    TryAddSpell(spellName, nil)
-                end
+                if spellName then TryAddSpell(spellName, nil) end
             end
             return SR_orig_CastSpell(id, bookType)
         end
